@@ -1,14 +1,62 @@
-# astrbot-plugin-helloworld
+# astrbot_plugin_AI-Inspection
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+基于 **AstrBot** 开发的 **QQ 官方机器人（WebSocket / Webhook）群消息 AI 智能审核插件**。  
+支持直接复用 AstrBot 已配置的大语言模型（含多模态图片审核），针对指定 QQ 群的全量消息进行实时内容审查，并根据违规分类自动撤回消息、分级禁言、累犯升级处罚与推送审计通知。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+---
 
-# Supports
+## 核心特性
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+1. **复用 AstrBot LLM 配置**
+   - 默认复用当前会话在 AstrBot 中配置的主对话大模型，也可在插件配置中指定专用的轻量或视觉模型作为审核提供商。
+   - 支持配置**备用 LLM 提供商**，主模型超时或异常时自动降级。
+   - 支持**多模态图片审核**（当模型不支持图片时自动降级为纯文本审核）。
+   - 支持附带**最近 N 条群聊上下文**，辅助识别需要联系上下文才能判断的引流或骚扰消息。
+
+2. **精细化违规分类与分级处置（可精确控制禁言哪类信息）**
+   - 内置 6 类常用群管维度：`广告引流/刷屏`、`色情低俗`、`涉政违法`、`诈骗钓鱼`、`人身攻击/辱骂`、`剧透/刷屏水群`。
+   - 每个分类均可独立开关、设置**处置动作**（`撤回并禁言` / `仅撤回` / `仅禁言` / `仅提醒不撤回`）、**禁言时长**（1～43200 分钟）以及给 LLM 的判定说明。
+   - 支持通过**自定义违规分类**无限扩展业务专属违规规则。
+   - 支持**累犯升级惩罚**：同一成员在指定时间窗口内多次违规，自动升级为禁言处理。
+
+3. **充分可定制的 LLM 提示词与防误杀机制**
+   - 提供**额外补充给 LLM 的审核提示**配置项，可直接编写本群群规、豁免语境、黑话解释或从严/从宽要求。
+   - 支持**置信度阈值**控制、AstrBot 管理员/QQ 群主与群管豁免、用户白名单、本地直拦敏感词（支持 `re:` 正则）与单群限流。
+
+4. **适配 QQ 官方机器人（`qq_official` / `qq_official_webhook`）**
+   - 自动从平台实例读取凭证（也支持在高级配置中手动覆盖 AppID / AppSecret 与沙箱 API 地址）。
+   - 调用 QQ 开放平台 `DELETE /v2/groups/{group_openid}/messages/{message_id}` 与 `POST /v2/groups/{group_openid}/restrict_chat_setting` 接口实现撤回与禁言。
+
+---
+
+## QQ 官方机器人前置配置
+
+在使用本插件进行群聊全量审核前，请确认已在 QQ 开放平台与手机 QQ 完成以下权限设置：
+
+1. **开启群全量消息接收**：
+   - 在 QQ 开放平台事件订阅中勾选 `GROUP_MESSAGE_CREATE`。
+   - 在手机 QQ 目标群的机器人资料/群设置中，将机器人消息权限设为 **「获取群内全部消息」**（否则仅 `@机器人` 的消息才会下发）。
+2. **撤回与禁言权限说明**：
+   - 请在目标 QQ 群中将机器人设为**群管理员**，并确保应用在 QQ 开放平台已获得对应的群管理接口权限。
+   - 受 QQ 官方开放平台机制限制，若应用未取得管理员撤回/群管接口授权，或消息发送已超过平台撤回时限，接口会返回权限错误并记录在 AstrBot 日志中。
+
+---
+
+## 管理员指令
+
+| 指令 | 说明 |
+| --- | --- |
+| `/audit status` | 查看插件开关、当前群监控状态、使用的 LLM 与统计数据 |
+| `/audit id` | 查看当前群的 `group_openid`、发送者的 `member_openid` 与会话 UMO |
+| `/audit enable` | 将当前群加入监控列表并保存配置 |
+| `/audit disable` | 将当前群移出监控列表（或加入忽略列表）并保存配置 |
+| `/audit test <文本>` | 试运行 AI 审核指定文本并输出判定结果（不会执行撤回或禁言） |
+| `/audit unmute <member_openid>` | 解除当前群指定成员的禁言 |
+
+---
+
+## 开发参考
+
+- 插件元数据定义：[metadata.yaml](./metadata.yaml)
+- WebUI 可视化配置 Schema：[_conf_schema.json](./_conf_schema.json)
+- AstrBot 官方插件开发文档：[docs/dev](./docs/dev/plugin-new.md)

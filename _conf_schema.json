@@ -1,0 +1,563 @@
+{
+  "enabled": {
+    "description": "启用 AI 群消息审核",
+    "type": "bool",
+    "default": true,
+    "hint": "总开关。关闭后插件不会对任何群消息执行 AI 审核。"
+  },
+  "scope": {
+    "description": "审核范围设置",
+    "type": "object",
+    "hint": "设置需要开启 AI 审核的 QQ 群聊。支持可视化选择会话或直接填写群 group_openid。",
+    "items": {
+      "audit_all_groups": {
+        "description": "审核所有已接入的 QQ 群",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后将审核所有来自 QQ 官方机器人的群消息（可通过下方忽略列表排除特定群）；关闭时仅审核指定群。"
+      },
+      "monitored_umos": {
+        "description": "监控的群聊会话 (UMO)",
+        "type": "list",
+        "default": [],
+        "_special": "umo",
+        "hint": "在 AstrBot 会话选择器中勾选需要审核的 QQ 群聊。"
+      },
+      "monitored_group_ids": {
+        "description": "监控的群 ID / group_openid 列表",
+        "type": "list",
+        "default": [],
+        "hint": "手动填写群聊的 group_openid（QQ 官机群唯一标识）。也可在群内由管理员发送 /audit enable 自动添加。"
+      },
+      "ignored_group_ids": {
+        "description": "忽略的群 ID / group_openid 列表",
+        "type": "list",
+        "default": [],
+        "hint": "当开启「审核所有已接入的 QQ 群」时，此列表中的群聊将被排除。优先级高于监控列表。"
+      }
+    }
+  },
+  "llm": {
+    "description": "LLM 模型与审核提示词设置",
+    "type": "object",
+    "hint": "复用 AstrBot 已配置的大模型提供商，并自定义给 LLM 的补充审核指令。",
+    "items": {
+      "llm_provider_id": {
+        "description": "主审核 LLM 提供商",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider",
+        "hint": "留空则自动复用 AstrBot 当前会话默认配置的 LLM 提供商；也可在此指定专用的轻量/多模态模型。"
+      },
+      "fallback_provider_id": {
+        "description": "备用 LLM 提供商",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider",
+        "hint": "可选。当主 LLM 请求失败或超时时，自动降级使用该提供商重新审核。"
+      },
+      "extra_system_prompt": {
+        "description": "额外补充给 LLM 的审核提示",
+        "type": "text",
+        "default": "",
+        "obvious_hint": true,
+        "hint": "追加到系统提示词末尾。适合填写本群专属群规、允许讨论的豁免语境、黑话解释或从严/从宽偏好（例如：允许讨论技术交流和 GitHub 链接，禁止一切代练与卖号广告）。"
+      },
+      "custom_system_prompt": {
+        "description": "完全自定义系统提示词（高级）",
+        "type": "text",
+        "default": "",
+        "hint": "留空则使用插件内置的专业审核系统提示词；若填写，将替换默认基础角色指令（仍会自动附带违规分类清单、额外补充提示与 JSON 输出格式约束）。"
+      },
+      "audit_image": {
+        "description": "审核图片内容",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后会将群消息中的图片一并发送给 LLM（需所选模型支持多模态/视觉理解）。若模型不支持图片，请关闭此项。"
+      },
+      "audit_context_count": {
+        "description": "携带最近群聊上下文条数",
+        "type": "int",
+        "default": 3,
+        "slider": {
+          "min": 0,
+          "max": 10,
+          "step": 1
+        },
+        "hint": "将同一群内最近 N 条消息作为参考上下文传给 LLM，帮助识别联系上下文才能看出的引流、刷屏或辱骂。0 表示仅看当前单条消息。"
+      },
+      "llm_timeout_seconds": {
+        "description": "LLM 审核超时时间（秒）",
+        "type": "int",
+        "default": 15,
+        "slider": {
+          "min": 5,
+          "max": 60,
+          "step": 1
+        },
+        "hint": "单次调用 LLM 的最大等待时间，超时将放弃本次审核并放行消息。"
+      },
+      "temperature": {
+        "description": "LLM 采样温度",
+        "type": "float",
+        "default": 0.1,
+        "slider": {
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.1
+        },
+        "hint": "越低判定越稳定一致，推荐 0.0 ~ 0.2。"
+      }
+    }
+  },
+  "moderation_policy": {
+    "description": "违规处置与通知策略",
+    "type": "object",
+    "hint": "控制置信度阈值、撤回与禁言总开关，以及群内提醒与管理员审计通知。",
+    "items": {
+      "confidence_threshold": {
+        "description": "违规判定置信度阈值",
+        "type": "float",
+        "default": 0.75,
+        "slider": {
+          "min": 0.1,
+          "max": 1.0,
+          "step": 0.05
+        },
+        "obvious_hint": true,
+        "hint": "只有当 LLM 给出的违规置信度大于等于此阈值时才执行撤回或禁言，降低误判率。"
+      },
+      "enable_recall": {
+        "description": "允许自动撤回违规消息",
+        "type": "bool",
+        "default": true,
+        "hint": "需要 QQ 官方机器人在群内拥有管理员身份及平台撤回权限。"
+      },
+      "enable_mute": {
+        "description": "允许自动禁言违规用户",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后，即使分类策略设置为禁言，也只会执行撤回或警告，不会调用禁言接口。"
+      },
+      "default_mute_minutes": {
+        "description": "兜底默认禁言时长（分钟）",
+        "type": "int",
+        "default": 10,
+        "slider": {
+          "min": 1,
+          "max": 43200,
+          "step": 1
+        },
+        "hint": "当某分类配置为禁言但未单独指定有效时长时使用。QQ 官机单次禁言上限为 30 天（43200 分钟）。"
+      },
+      "stop_event_on_violation": {
+        "description": "违规后拦截事件传播",
+        "type": "bool",
+        "default": true,
+        "hint": "判定违规后调用 event.stop_event()，阻止该违规消息继续触发 AstrBot 主对话或其他插件。"
+      },
+      "notify_in_group": {
+        "description": "违规处置后在群内发送提醒",
+        "type": "bool",
+        "default": true,
+        "hint": "在群内回复一条提示消息，告知违规类型与处置结果。"
+      },
+      "notify_include_at": {
+        "description": "群内提醒是否 @ 违规发送者",
+        "type": "bool",
+        "default": true,
+        "hint": "开启时在提醒消息前附上 @发送者。"
+      },
+      "notify_template": {
+        "description": "群内提醒消息模板",
+        "type": "text",
+        "default": "⚠️ 检测到违规消息（分类：{category}），已执行{action}。原因：{reason}",
+        "hint": "可用占位符：{user}、{category}、{reason}、{action}、{mute_minutes}、{confidence}。"
+      },
+      "auto_delete_notice_seconds": {
+        "description": "群内提醒自动撤回延时（秒）",
+        "type": "int",
+        "default": 0,
+        "slider": {
+          "min": 0,
+          "max": 120,
+          "step": 5
+        },
+        "hint": "大于 0 时，机器人发出的违规提醒消息将在指定秒数后自动撤回，保持群聊整洁；0 表示不自动撤回。"
+      },
+      "admin_notify_umos": {
+        "description": "管理员审计通知会话 (UMO)",
+        "type": "list",
+        "default": [],
+        "_special": "umo",
+        "hint": "发生违规拦截时，将详细审计记录（群 ID、发送者、原文摘要、图片数、AI 判定理由与 API 执行状态）推送到指定会话。"
+      }
+    }
+  },
+  "categories": {
+    "description": "预设违规分类与分级处置（可精细配置禁言哪类信息）",
+    "type": "object",
+    "hint": "分别控制每类违规信息是否启用、处置动作（仅提醒/仅撤回/仅禁言/撤回并禁言）以及对应禁言时长。",
+    "items": {
+      "spam_ad": {
+        "description": "广告引流 / 刷屏推广",
+        "type": "object",
+        "collapsed": true,
+        "items": {
+          "enabled": {
+            "description": "启用检测",
+            "type": "bool",
+            "default": true
+          },
+          "action": {
+            "description": "处置动作",
+            "type": "string",
+            "default": "recall_and_mute",
+            "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+            "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"]
+          },
+          "mute_minutes": {
+            "description": "禁言时长（分钟）",
+            "type": "int",
+            "default": 60,
+            "slider": {"min": 1, "max": 43200, "step": 1}
+          },
+          "description": {
+            "description": "给 LLM 的判定说明",
+            "type": "text",
+            "default": "未经允许的商业广告、引流二维码、加群/加微推广、刷屏营销、卖号代练推广等。"
+          }
+        }
+      },
+      "nsfw_porn": {
+        "description": "色情低俗 / 涉黄信息",
+        "type": "object",
+        "collapsed": true,
+        "items": {
+          "enabled": {
+            "description": "启用检测",
+            "type": "bool",
+            "default": true
+          },
+          "action": {
+            "description": "处置动作",
+            "type": "string",
+            "default": "recall_and_mute",
+            "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+            "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"]
+          },
+          "mute_minutes": {
+            "description": "禁言时长（分钟）",
+            "type": "int",
+            "default": 1440,
+            "slider": {"min": 1, "max": 43200, "step": 1}
+          },
+          "description": {
+            "description": "给 LLM 的判定说明",
+            "type": "text",
+            "default": "色情、露骨性暗示、低俗擦边图片或文字、涉黄资源传播与引导。"
+          }
+        }
+      },
+      "politics_illegal": {
+        "description": "涉政敏感 / 违法违规",
+        "type": "object",
+        "collapsed": true,
+        "items": {
+          "enabled": {
+            "description": "启用检测",
+            "type": "bool",
+            "default": true
+          },
+          "action": {
+            "description": "处置动作",
+            "type": "string",
+            "default": "recall_and_mute",
+            "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+            "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"]
+          },
+          "mute_minutes": {
+            "description": "禁言时长（分钟）",
+            "type": "int",
+            "default": 1440,
+            "slider": {"min": 1, "max": 43200, "step": 1}
+          },
+          "description": {
+            "description": "给 LLM 的判定说明",
+            "type": "text",
+            "default": "涉政敏感言论、暴恐血腥、赌博毒品、黑灰产教学、违法犯罪或危害国家安全的内容。"
+          }
+        }
+      },
+      "fraud_phishing": {
+        "description": "诈骗钓鱼 / 恶意链接",
+        "type": "object",
+        "collapsed": true,
+        "items": {
+          "enabled": {
+            "description": "启用检测",
+            "type": "bool",
+            "default": true
+          },
+          "action": {
+            "description": "处置动作",
+            "type": "string",
+            "default": "recall_and_mute",
+            "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+            "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"]
+          },
+          "mute_minutes": {
+            "description": "禁言时长（分钟）",
+            "type": "int",
+            "default": 1440,
+            "slider": {"min": 1, "max": 43200, "step": 1}
+          },
+          "description": {
+            "description": "给 LLM 的判定说明",
+            "type": "text",
+            "default": "电信网络诈骗、刷单兼职骗局、盗号钓鱼链接、假冒官方/管理员诱导转账或索要验证码。"
+          }
+        }
+      },
+      "harassment_abuse": {
+        "description": "人身攻击 / 辱骂引战",
+        "type": "object",
+        "collapsed": true,
+        "items": {
+          "enabled": {
+            "description": "启用检测",
+            "type": "bool",
+            "default": true
+          },
+          "action": {
+            "description": "处置动作",
+            "type": "string",
+            "default": "recall_only",
+            "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+            "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"]
+          },
+          "mute_minutes": {
+            "description": "禁言时长（分钟）",
+            "type": "int",
+            "default": 30,
+            "slider": {"min": 1, "max": 43200, "step": 1}
+          },
+          "description": {
+            "description": "给 LLM 的判定说明",
+            "type": "text",
+            "default": "恶意辱骂、人身攻击、仇恨歧视、人肉开盒威胁或恶意引战挑衅（不含朋友间无恶意的正常玩笑）。"
+          }
+        }
+      },
+      "spoiler_offtopic": {
+        "description": "剧透 / 刷屏水群 / 违规话题",
+        "type": "object",
+        "collapsed": true,
+        "items": {
+          "enabled": {
+            "description": "启用检测",
+            "type": "bool",
+            "default": false
+          },
+          "action": {
+            "description": "处置动作",
+            "type": "string",
+            "default": "warn_only",
+            "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+            "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"]
+          },
+          "mute_minutes": {
+            "description": "禁言时长（分钟）",
+            "type": "int",
+            "default": 10,
+            "slider": {"min": 1, "max": 43200, "step": 1}
+          },
+          "description": {
+            "description": "给 LLM 的判定说明",
+            "type": "text",
+            "default": "无意义的恶意刷屏、高频无意义字符轰炸，或在群规禁止的情况下发布剧透内容。"
+          }
+        }
+      }
+    }
+  },
+  "custom_categories": {
+    "description": "自定义违规分类规则",
+    "type": "template_list",
+    "hint": "可自由添加额外的违规信息类型，例如「外挂讨论」「未经授权的交易」等，并独立指定是否撤回与禁言时长。",
+    "templates": {
+      "rule": {
+        "name": "自定义违规分类",
+        "hint": "定义一种新的违规类型及其处置方式。",
+        "display_item": "name",
+        "hide_hint_in_list": true,
+        "items": {
+          "key": {
+            "description": "分类标识 (英文/下划线)",
+            "type": "string",
+            "default": "custom_rule_1"
+          },
+          "name": {
+            "description": "分类显示名称",
+            "type": "string",
+            "default": "自定义违规"
+          },
+          "enabled": {
+            "description": "启用该分类",
+            "type": "bool",
+            "default": true
+          },
+          "action": {
+            "description": "处置动作",
+            "type": "string",
+            "default": "recall_and_mute",
+            "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+            "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"]
+          },
+          "mute_minutes": {
+            "description": "禁言时长（分钟）",
+            "type": "int",
+            "default": 30,
+            "slider": {"min": 1, "max": 43200, "step": 1}
+          },
+          "description": {
+            "description": "给 LLM 的判定说明",
+            "type": "text",
+            "default": "请在此详细描述什么样的消息属于该违规分类。"
+          }
+        }
+      }
+    }
+  },
+  "escalation": {
+    "description": "累犯升级惩罚设置",
+    "type": "object",
+    "collapsed": true,
+    "hint": "当同一群成员在短时间内多次触发违规（哪怕原分类仅设置了撤回或提醒），自动升级为禁言。",
+    "items": {
+      "enabled": {
+        "description": "启用累犯升级惩罚",
+        "type": "bool",
+        "default": true
+      },
+      "window_minutes": {
+        "description": "累犯统计时间窗口（分钟）",
+        "type": "int",
+        "default": 60,
+        "slider": {"min": 5, "max": 1440, "step": 5}
+      },
+      "threshold_count": {
+        "description": "触发升级的累计违规次数",
+        "type": "int",
+        "default": 3,
+        "slider": {"min": 2, "max": 20, "step": 1}
+      },
+      "escalate_mute_minutes": {
+        "description": "升级后的禁言时长（分钟）",
+        "type": "int",
+        "default": 120,
+        "slider": {"min": 1, "max": 43200, "step": 1},
+        "hint": "若原分类已配置更长的禁言时长，将取两者中的较大值。"
+      }
+    }
+  },
+  "whitelist_and_filter": {
+    "description": "白名单、预过滤与限流设置",
+    "type": "object",
+    "collapsed": true,
+    "hint": "减少不必要的 LLM Token 消耗，豁免管理员与白名单用户，或配置本地极速敏感词拦截。",
+    "items": {
+      "exempt_astrbot_admins": {
+        "description": "豁免 AstrBot 管理员",
+        "type": "bool",
+        "default": true,
+        "hint": "不审核在 AstrBot 全局配置中列为管理员的用户消息。"
+      },
+      "exempt_group_admins": {
+        "description": "豁免 QQ 群主与群管理员",
+        "type": "bool",
+        "default": true,
+        "hint": "根据 QQ 官机消息中的 member_role 字段，自动跳过群主 (owner) 和群管理员 (admin) 的消息。"
+      },
+      "whitelist_users": {
+        "description": "白名单用户 ID / member_openid",
+        "type": "list",
+        "default": [],
+        "_special": "sender_id",
+        "hint": "白名单中的用户消息不会经过审核。"
+      },
+      "skip_commands": {
+        "description": "跳过指令前缀消息",
+        "type": "bool",
+        "default": true,
+        "hint": "跳过以 / 开头的机器人指令消息，避免误审指令。"
+      },
+      "min_text_length": {
+        "description": "触发审核的最短文本长度",
+        "type": "int",
+        "default": 1,
+        "slider": {"min": 0, "max": 50, "step": 1},
+        "hint": "当消息没有图片且纯文本长度小于此值时跳过 AI 审核（设为 1 表示至少有 1 个字才审核）。"
+      },
+      "ignore_pure_emoji_face": {
+        "description": "跳过纯表情消息",
+        "type": "bool",
+        "default": false,
+        "hint": "消息仅包含 QQ 表情或空文本（且无图片）时不送审。"
+      },
+      "keyword_blocklist": {
+        "description": "本地直拦敏感词列表",
+        "type": "list",
+        "default": [],
+        "hint": "命中列表任意条目时直接判定违规并执行「广告/默认」策略，无需调用 LLM。支持普通关键词（不区分大小写）或以 re: 开头的正则表达式。"
+      },
+      "keyword_allowlist": {
+        "description": "本地直放关键词/短语列表",
+        "type": "list",
+        "default": [],
+        "hint": "若整条纯文本消息（去除首尾空白后）完全匹配列表中的安全词（如「早安」「收到」），直接放行且不调用 LLM。"
+      },
+      "rate_limit_per_group_per_minute": {
+        "description": "单群每分钟最大 AI 审核次数",
+        "type": "int",
+        "default": 60,
+        "slider": {"min": 0, "max": 300, "step": 5},
+        "hint": "防止群内高频刷屏导致 LLM 额度快速耗尽。设为 0 表示不限制。"
+      }
+    }
+  },
+  "qq_official_api": {
+    "description": "QQ 官方机器人接口高级设置",
+    "type": "object",
+    "collapsed": true,
+    "hint": "通常无需修改。仅在自动读取平台凭证失败，或使用沙箱环境时调整。",
+    "items": {
+      "api_base_url": {
+        "description": "QQ 开放平台 API 地址",
+        "type": "string",
+        "default": "https://api.sgroup.qq.com",
+        "hint": "正式环境为 https://api.sgroup.qq.com，沙箱测试环境可填写 https://sandbox.api.sgroup.qq.com。"
+      },
+      "qq_official_appid": {
+        "description": "手动指定 AppID（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "留空则自动从 AstrBot 平台适配器配置中读取。"
+      },
+      "qq_official_secret": {
+        "description": "手动指定 AppSecret（可选）",
+        "type": "string",
+        "default": "",
+        "secret": true,
+        "hint": "留空则自动从 AstrBot 平台适配器配置中读取。"
+      },
+      "debug_log": {
+        "description": "输出详细审核调试日志",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后会在 AstrBot 日志中打印每条消息的送审上下文、LLM 原始 JSON 响应及 QQ API 调用细节。"
+      }
+    }
+  }
+}
+
