@@ -265,6 +265,7 @@ class AIInspectionPlugin(Star):
                 context_lines=recent_context,
                 categories=categories,
                 config=self.config,
+                event=event,
             )
         except Exception as exc:
             self.tracker.bump_error()
@@ -711,6 +712,7 @@ class AIInspectionPlugin(Star):
                 context_lines=[],
                 categories=categories,
                 config=self.config,
+                event=event,
             )
         except Exception as exc:
             yield event.plain_result(f"❌ 试运行审核失败：{exc}")
