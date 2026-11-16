@@ -731,9 +731,11 @@ class AIInspectionPlugin(Star):
             return
         group_openid = extract_group_openid(event) or "(私聊或非群聊)"
         member_openid = extract_member_openid(event) or "(未知)"
+        member_role = extract_member_role(event)
         yield event.plain_result(
             f"group_openid: {group_openid}\n"
             f"member_openid: {member_openid}\n"
+            f"member_role: {member_role}\n"
             f"UMO: {event.unified_msg_origin}"
         )
 

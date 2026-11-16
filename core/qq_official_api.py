@@ -63,26 +63,72 @@ def extract_message_id(event: AstrMessageEvent) -> str:
     return str(mid or "").strip()
 
 
-def extract_member_role(event: AstrMessageEvent) -> str:
-    """Extract sender group role ('owner', 'admin', or 'member') when available."""
-    raw = getattr(event.message_obj, "raw_message", None)
-    if raw is None:
+def _normalize_role_value(val: Any) -> str | None:
+    if val in (None, ""):
+        return None
+    role_lower = str(val).strip().lower()
+    if role_lower in ("owner", "4", "群主"):
+        return "owner"
+    if role_lower in ("admin", "2", "管理员"):
+        return "admin"
+    if role_lower in ("member", "1", "普通成员"):
         return "member"
+    return None
 
-    author = _get_attr_or_key(raw, "author")
+
+def _extract_role_from_author(author: Any) -> str | None:
+    if author is None:
+        return None
     role = _get_attr_or_key(author, "member_role", "role")
-    if role:
-        role_lower = str(role).strip().lower()
-        if role_lower in ("owner", "admin", "4", "2"):
-            return "owner" if role_lower in ("owner", "4") else "admin"
+    normalized = _normalize_role_value(role)
+    if normalized:
+        return normalized
 
     roles = _get_attr_or_key(author, "roles")
     if isinstance(roles, (list, tuple, set)):
-        lowered = {str(r).strip().lower() for r in roles}
-        if "owner" in lowered or "4" in lowered:
+        parsed_roles = {_normalize_role_value(r) for r in roles}
+        if "owner" in parsed_roles:
             return "owner"
-        if "admin" in lowered or "2" in lowered:
+        if "admin" in parsed_roles:
             return "admin"
+        if "member" in parsed_roles:
+            return "member"
+    return None
+
+
+def extract_member_role(event: AstrMessageEvent) -> str:
+    """Extract sender group role ('owner', 'admin', or 'member') when available."""
+    raw = getattr(event.message_obj, "raw_message", None)
+    sender = getattr(event.message_obj, "sender", None)
+
+    # AstrBot's PatchedGroupMessage stores the full QQ GROUP_MESSAGE_CREATE dict
+    # in `raw_message.raw_data` because qq-botpy's GroupMessage.author drops `member_role`.
+    containers: list[Any] = []
+    if raw is not None:
+        for attr in ("raw_data", "_raw", "data"):
+            inner = getattr(raw, attr, None)
+            if inner is not None:
+                containers.append(inner)
+                d_inner = _get_attr_or_key(inner, "d")
+                if d_inner is not None:
+                    containers.append(d_inner)
+        containers.append(raw)
+        d_raw = _get_attr_or_key(raw, "d")
+        if d_raw is not None:
+            containers.append(d_raw)
+
+    for container in containers:
+        author = _get_attr_or_key(container, "author")
+        role = _extract_role_from_author(author)
+        if role:
+            return role
+        top_role = _normalize_role_value(_get_attr_or_key(container, "member_role"))
+        if top_role:
+            return top_role
+
+    sender_role = _extract_role_from_author(sender)
+    if sender_role:
+        return sender_role
 
     return "member"
 
