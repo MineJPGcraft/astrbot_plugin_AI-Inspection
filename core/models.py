@@ -181,3 +181,28 @@ def build_active_categories(config: dict[str, Any]) -> dict[str, CategoryRule]:
 
     return rules
 
+
+def build_keyword_rule(config: dict[str, Any]) -> CategoryRule:
+    """Build the independent rule used for local keyword blocklist matches."""
+    wf = config.get("whitelist_and_filter", {}) or {}
+    default_mute = _safe_int(
+        (config.get("moderation_policy", {}) or {}).get("default_mute_minutes", 10),
+        default=10,
+        minimum=1,
+    )
+    name = str(wf.get("keyword_category_name") or "敏感词违规").strip() or "敏感词违规"
+    action = _normalize_action(wf.get("keyword_action"), ACTION_RECALL_ONLY)
+    mute_minutes = _safe_int(
+        wf.get("keyword_mute_minutes", default_mute),
+        default=default_mute,
+        minimum=1,
+    )
+    return CategoryRule(
+        key="keyword_blocklist",
+        name=name,
+        description="命中本地敏感词规则",
+        enabled=True,
+        action=action,
+        mute_minutes=mute_minutes,
+    )
+

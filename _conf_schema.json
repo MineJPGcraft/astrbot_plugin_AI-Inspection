@@ -562,7 +562,28 @@
         "description": "本地直拦敏感词列表",
         "type": "list",
         "default": [],
-        "hint": "命中列表任意条目时直接判定违规并执行「广告/默认」策略，无需调用 LLM。支持普通关键词（不区分大小写）或以 re: 开头的正则表达式。"
+        "hint": "命中列表任意条目时直接判定违规，并按下方独立的「敏感词处置策略」执行，不再与广告分类共用规则。支持普通关键词（不区分大小写）或以 re: 开头的正则表达式。"
+      },
+      "keyword_category_name": {
+        "description": "敏感词违规显示分类名",
+        "type": "string",
+        "default": "敏感词违规",
+        "hint": "命中本地敏感词后，在群内提醒与管理员审计通知中显示的违规分类名称。"
+      },
+      "keyword_action": {
+        "description": "敏感词处置动作",
+        "type": "string",
+        "default": "recall_only",
+        "options": ["recall_and_mute", "recall_only", "mute_only", "warn_only"],
+        "labels": ["撤回并禁言", "仅撤回", "仅禁言", "仅提醒不撤回"],
+        "hint": "独立控制触发本地敏感词时的处置方式，不再复用广告分类设置。"
+      },
+      "keyword_mute_minutes": {
+        "description": "敏感词禁言时长（分钟）",
+        "type": "int",
+        "default": 10,
+        "slider": {"min": 1, "max": 43200, "step": 1},
+        "hint": "当「敏感词处置动作」包含禁言时生效（1 ~ 43200 分钟）。"
       },
       "keyword_allowlist": {
         "description": "本地直放关键词/短语列表",

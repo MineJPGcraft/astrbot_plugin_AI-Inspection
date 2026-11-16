@@ -2,7 +2,7 @@ name: astrbot_plugin_ai_inspection # 插件唯一识别名，以 astrbot_plugin_
 display_name: AI 群消息审核 (QQ官机) # 用于展示的名字
 desc: 复用 AstrBot LLM 配置，针对指定 QQ 群的全量消息进行 AI 智能审核，支持按违规类型自动撤回、分级禁言、累犯升级惩罚、额外自定义审核提示词与审计日志推送。 # 插件简短描述
 short_desc: QQ 官机群聊 AI 全量消息审核、自动撤回与分级禁言插件
-version: v1.0.5 # 插件版本号
+version: v1.0.6 # 插件版本号
 author: Lynlan # 作者
 repo: https://github.com/MineJPGcraft/astrbot_plugin_AI-Inspection # 插件的仓库地址
 astrbot_version: ">=4.5.7"

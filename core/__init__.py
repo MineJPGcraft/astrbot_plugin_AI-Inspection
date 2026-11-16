@@ -6,6 +6,7 @@ from .models import (
     AuditDecision,
     CategoryRule,
     build_active_categories,
+    build_keyword_rule,
 )
 from .moderator import MessageModerator
 from .qq_official_api import (
@@ -37,6 +38,7 @@ __all__ = [
     "QQOfficialClient",
     "ScheduleStatus",
     "build_active_categories",
+    "build_keyword_rule",
     "evaluate_schedule",
     "extract_group_openid",
     "extract_member_openid",

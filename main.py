@@ -15,7 +15,6 @@ from .core import (
     ACTION_LABELS,
     ActionExecutionResult,
     AuditDecision,
-    CategoryRule,
     MODE_DISABLED,
     MODE_FULL,
     MODE_KEYWORD_ONLY,
@@ -23,6 +22,7 @@ from .core import (
     ModerationTracker,
     QQOfficialClient,
     build_active_categories,
+    build_keyword_rule,
     evaluate_schedule,
     extract_group_openid,
     extract_member_openid,
@@ -251,43 +251,26 @@ class AIInspectionPlugin(Star):
             ):
                 return
 
-        categories = build_active_categories(self.config)
-
-        # Local fast-path blocklist check (zero LLM cost)
+        # Local fast-path blocklist check (zero LLM cost, independent policy)
         matched_kw = self.moderator.check_keyword_blocklist(
             text, wf.get("keyword_blocklist") or []
         )
         if matched_kw is not None:
-            default_mute = max(
-                1,
-                int(
-                    (self.config.get("moderation_policy", {}) or {}).get(
-                        "default_mute_minutes", 10
-                    )
-                ),
-            )
-            default_rule = (
-                categories.get("spam_ad")
-                or (next(iter(categories.values())) if categories else None)
-                or CategoryRule(
-                    key="keyword_blocklist",
-                    name="敏感词违规",
-                    description="命中本地敏感词",
-                    action=ACTION_RECALL_ONLY,
-                    mute_minutes=default_mute,
-                )
-            )
+            kw_rule = build_keyword_rule(self.config)
             decision = AuditDecision(
                 violated=True,
-                category_key=default_rule.key,
-                category_name=default_rule.name,
+                category_key=kw_rule.key,
+                category_name=kw_rule.name,
                 confidence=1.0,
-                #reason=f"命中本地敏感词规则 ({matched_kw})",
-                reason=f"命中本地敏感词规则",
-                action=default_rule.action,
-                mute_minutes=default_rule.mute_minutes,
+                reason="命中本地敏感词规则",
+                action=kw_rule.action,
+                mute_minutes=kw_rule.mute_minutes,
                 source="keyword",
             )
+            if self._is_debug():
+                logger.info(
+                    f"[AI-Inspection] 群 {group_openid} 成员 {sender_id} 命中本地敏感词规则: {matched_kw}"
+                )
             await self._handle_violation(
                 event=event,
                 group_openid=group_openid,
@@ -304,6 +287,7 @@ class AIInspectionPlugin(Star):
                 logger.info(f"[AI-Inspection] {sched.summary}，跳过 AI 审核")
             return
 
+        categories = build_active_categories(self.config)
         if not categories:
             return
 
