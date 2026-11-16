@@ -37,6 +37,51 @@
       }
     }
   },
+  "schedule": {
+    "description": "审核时段限制",
+    "type": "object",
+    "hint": "限制仅在特定时间段调用 AI 审核，非审核时段可选择仅保留本地关键词屏蔽或彻底关闭。",
+    "items": {
+      "enabled": {
+        "description": "启用分时段审核控制",
+        "type": "bool",
+        "default": false,
+        "hint": "关闭时全天 24 小时执行 AI 审核；开启后仅在下方配置的时间段内调用 LLM 审核。"
+      },
+      "active_ranges": {
+        "description": "允许 AI 审核的时间段",
+        "type": "list",
+        "default": ["22:00-08:00"],
+        "obvious_hint": true,
+        "hint": "格式为 HH:MM-HH:MM，可添加多条（如 22:00-08:00 支持跨午夜、12:00-14:00）。"
+      },
+      "off_hours_mode": {
+        "description": "非审核时段策略",
+        "type": "string",
+        "default": "keyword_only",
+        "options": ["keyword_only", "disable_all"],
+        "labels": ["仅保留本地关键词屏蔽", "彻底关闭审核（完全放行）"],
+        "hint": "当当前时间不在上述时间段内时：选择「仅保留本地关键词屏蔽」将跳过 LLM 仅检查敏感词列表；选择「彻底关闭审核」将直接放行所有消息。"
+      },
+      "active_weekdays": {
+        "description": "生效星期（可选，1~7）",
+        "type": "list",
+        "default": [],
+        "hint": "填写 1~7（1=周一，7=周日）限制仅在指定星期生效；留空表示每天生效。"
+      },
+      "timezone_offset_hours": {
+        "description": "时区偏移（UTC+N 小时）",
+        "type": "int",
+        "default": 8,
+        "slider": {
+          "min": -12,
+          "max": 14,
+          "step": 1
+        },
+        "hint": "用于判断当前时间所属时区，东八区（北京时间）为 8，可避免 Docker 容器默认 UTC 时区造成偏差。"
+      }
+    }
+  },
   "llm": {
     "description": "LLM 模型与审核提示词设置",
     "type": "object",

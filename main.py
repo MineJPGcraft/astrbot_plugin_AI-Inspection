@@ -15,10 +15,14 @@ from .core import (
     ACTION_LABELS,
     ActionExecutionResult,
     AuditDecision,
+    CategoryRule,
+    MODE_DISABLED,
+    MODE_KEYWORD_ONLY,
     MessageModerator,
     ModerationTracker,
     QQOfficialClient,
     build_active_categories,
+    evaluate_schedule,
     extract_group_openid,
     extract_member_openid,
     extract_member_role,
@@ -179,10 +183,16 @@ class AIInspectionPlugin(Star):
         if bool(wf.get("skip_commands", True)) and raw_text.startswith("/"):
             return
 
+        sched = evaluate_schedule(self.config)
+        if sched.mode == MODE_DISABLED:
+            if self._is_debug():
+                logger.info(f"[AI-Inspection] {sched.summary}，跳过群 {group_openid} 消息")
+            return
+
         sender_id = extract_member_openid(event)
         sender_name = event.get_sender_name() or sender_id
         llm_cfg = self.config.get("llm", {}) or {}
-        audit_image = bool(llm_cfg.get("audit_image", True))
+        audit_image = bool(llm_cfg.get("audit_image", True)) and sched.mode != MODE_KEYWORD_ONLY
 
         text, image_urls, is_pure_face = await self._extract_message_payload(
             event, audit_image=audit_image
@@ -215,15 +225,31 @@ class AIInspectionPlugin(Star):
             return
 
         categories = build_active_categories(self.config)
-        if not categories:
-            return
 
         # Local fast-path blocklist check (zero LLM cost)
         matched_kw = self.moderator.check_keyword_blocklist(
             text, wf.get("keyword_blocklist") or []
         )
         if matched_kw is not None:
-            default_rule = categories.get("spam_ad") or next(iter(categories.values()))
+            default_mute = max(
+                1,
+                int(
+                    (self.config.get("moderation_policy", {}) or {}).get(
+                        "default_mute_minutes", 10
+                    )
+                ),
+            )
+            default_rule = (
+                categories.get("spam_ad")
+                or (next(iter(categories.values())) if categories else None)
+                or CategoryRule(
+                    key="keyword_blocklist",
+                    name="敏感词违规",
+                    description="命中本地敏感词",
+                    action=ACTION_RECALL_ONLY,
+                    mute_minutes=default_mute,
+                )
+            )
             decision = AuditDecision(
                 violated=True,
                 category_key=default_rule.key,
@@ -244,6 +270,14 @@ class AIInspectionPlugin(Star):
                 image_count=len(image_urls),
                 decision=decision,
             )
+            return
+
+        if sched.mode == MODE_KEYWORD_ONLY:
+            if self._is_debug():
+                logger.info(f"[AI-Inspection] {sched.summary}，跳过 AI 审核")
+            return
+
+        if not categories:
             return
 
         rate_limit = max(0, int(wf.get("rate_limit_per_group_per_minute", 60)))
@@ -600,11 +634,13 @@ class AIInspectionPlugin(Star):
             except Exception:
                 prov_id = "默认会话模型"
         categories = build_active_categories(self.config)
+        sched = evaluate_schedule(self.config)
         stats = self.tracker.stats
         yield event.plain_result(
             "🛡️ AI 群消息审核状态\n"
             f"总开关: {'已开启' if self.config.get('enabled', True) else '已关闭'}\n"
             f"当前群监控: {'✅ 已启用' if monitored else '❌ 未启用'}\n"
+            f"时段状态: {sched.summary}\n"
             f"使用 LLM: {prov_id or '未配置'}\n"
             f"启用分类数: {len(categories)}\n"
             f"累计审核: {stats['total_checked']} | 拦截违规: {stats['total_violated']} | "
