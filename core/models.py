@@ -109,6 +109,7 @@ class ActionExecutionResult:
     violation_count: int = 0
     final_action: str = ACTION_WARN_ONLY
     final_mute_minutes: int = 0
+    punishment_skipped_reason: str = ""
 
 
 def _normalize_action(raw_action: Any, fallback: str = ACTION_RECALL_ONLY) -> str:

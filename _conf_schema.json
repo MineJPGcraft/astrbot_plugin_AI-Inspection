@@ -522,7 +522,7 @@
         "description": "豁免 QQ 群主与群管理员",
         "type": "bool",
         "default": true,
-        "hint": "根据 QQ 官机消息中的 member_role 字段，自动跳过群主 (owner) 和群管理员 (admin) 的消息。"
+        "hint": "开启时直接跳过群主 (owner) 和群管理员 (admin) 的全部审核（含本地敏感词与 AI 审核）；关闭时仍会检测其消息，但命中后仅记录日志并推送管理员告警，不会调用撤回或禁言接口。"
       },
       "whitelist_users": {
         "description": "白名单用户 ID / member_openid",

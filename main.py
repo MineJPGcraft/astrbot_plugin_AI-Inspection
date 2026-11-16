@@ -339,28 +339,44 @@ class AIInspectionPlugin(Star):
         decision: AuditDecision,
     ) -> None:
         self.tracker.bump_violated(decision.category_key)
-        policy = self.config.get("moderation_policy", {}) or {}
-        if bool(policy.get("stop_event_on_violation", True)):
-            event.stop_event()
+        member_role = extract_member_role(event)
+        is_group_privileged = member_role in ("owner", "admin")
 
         platform = self._get_platform(event)
         message_id = extract_message_id(event)
 
-        exec_res = await self._execute_actions(
-            event=event,
-            platform=platform,
-            group_openid=group_openid,
-            member_openid=sender_id,
-            message_id=message_id,
-            decision=decision,
-        )
+        if is_group_privileged:
+            role_label = "群主" if member_role == "owner" else "群管理员"
+            exec_res = ActionExecutionResult(
+                final_action=ACTION_WARN_ONLY,
+                punishment_skipped_reason=f"发送者为 QQ {role_label}，跳过接口处罚，仅记录告警",
+            )
+            logger.warning(
+                f"[AI-Inspection] 检测到群 {group_openid} {role_label} {sender_name}({sender_id}) "
+                f"触发违规（仅日志与告警，不调用撤回/禁言接口）: "
+                f"分类={decision.category_name}, 置信度={decision.confidence:.2f}, "
+                f"原因={decision.reason}"
+            )
+        else:
+            policy = self.config.get("moderation_policy", {}) or {}
+            if bool(policy.get("stop_event_on_violation", True)):
+                event.stop_event()
 
-        logger.info(
-            f"[AI-Inspection] 拦截群 {group_openid} 成员 {sender_name}({sender_id}) 违规消息: "
-            f"分类={decision.category_name}, 置信度={decision.confidence:.2f}, "
-            f"动作={exec_res.final_action}, 撤回={exec_res.recalled}, 禁言={exec_res.muted}, "
-            f"原因={decision.reason}"
-        )
+            exec_res = await self._execute_actions(
+                event=event,
+                platform=platform,
+                group_openid=group_openid,
+                member_openid=sender_id,
+                message_id=message_id,
+                decision=decision,
+            )
+
+            logger.info(
+                f"[AI-Inspection] 拦截群 {group_openid} 成员 {sender_name}({sender_id}) 违规消息: "
+                f"分类={decision.category_name}, 置信度={decision.confidence:.2f}, "
+                f"动作={exec_res.final_action}, 撤回={exec_res.recalled}, 禁言={exec_res.muted}, "
+                f"原因={decision.reason}"
+            )
 
         await self._send_notifications(
             event=event,
@@ -481,17 +497,22 @@ class AIInspectionPlugin(Star):
     ) -> None:
         policy = self.config.get("moderation_policy", {}) or {}
         action_parts: list[str] = []
-        if exec_res.recalled:
-            action_parts.append("撤回消息")
-        if exec_res.muted:
-            action_parts.append(f"禁言 {exec_res.final_mute_minutes} 分钟")
-        if not action_parts:
-            action_parts.append(ACTION_LABELS.get(exec_res.final_action, "警告提醒"))
-        action_text = "并".join(action_parts)
-        if exec_res.escalated:
-            action_text += f"（累犯第 {exec_res.violation_count} 次升级处罚）"
+        if exec_res.punishment_skipped_reason:
+            action_text = f"仅记录告警（{exec_res.punishment_skipped_reason}）"
+        else:
+            if exec_res.recalled:
+                action_parts.append("撤回消息")
+            if exec_res.muted:
+                action_parts.append(f"禁言 {exec_res.final_mute_minutes} 分钟")
+            if not action_parts:
+                action_parts.append(ACTION_LABELS.get(exec_res.final_action, "警告提醒"))
+            action_text = "并".join(action_parts)
+            if exec_res.escalated:
+                action_text += f"（累犯第 {exec_res.violation_count} 次升级处罚）"
 
-        if bool(policy.get("notify_in_group", True)):
+        if not exec_res.punishment_skipped_reason and bool(
+            policy.get("notify_in_group", True)
+        ):
             template = str(
                 policy.get("notify_template")
                 or "⚠️ 检测到违规消息（分类：{category}），已执行{action}。原因：{reason}"
@@ -565,6 +586,33 @@ class AIInspectionPlugin(Star):
             if image_count > 0:
                 preview += f" [图片x{image_count}]"
 
+            recall_status = (
+                f"已跳过（{exec_res.punishment_skipped_reason}）"
+                if exec_res.punishment_skipped_reason
+                else (
+                    "成功"
+                    if exec_res.recalled
+                    else (
+                        "未执行/失败: " + exec_res.recall_error
+                        if exec_res.recall_error
+                        else "未启用"
+                    )
+                )
+            )
+            mute_status = (
+                f"已跳过（{exec_res.punishment_skipped_reason}）"
+                if exec_res.punishment_skipped_reason
+                else (
+                    "成功"
+                    if exec_res.muted
+                    else (
+                        "未执行/失败: " + exec_res.mute_error
+                        if exec_res.mute_error
+                        else "未启用"
+                    )
+                )
+            )
+
             audit_report = (
                 "🛡️ AI 群消息审计通知\n"
                 f"群 ID: {group_openid}\n"
@@ -573,8 +621,8 @@ class AIInspectionPlugin(Star):
                 f"判定置信度: {decision.confidence:.2f} (来源: {decision.source})\n"
                 f"判定原因: {decision.reason}\n"
                 f"执行结果: {action_text}\n"
-                f"撤回状态: {'成功' if exec_res.recalled else ('未执行/失败: ' + exec_res.recall_error if exec_res.recall_error else '未启用')}\n"
-                f"禁言状态: {'成功' if exec_res.muted else ('未执行/失败: ' + exec_res.mute_error if exec_res.mute_error else '未启用')}\n"
+                f"撤回状态: {recall_status}\n"
+                f"禁言状态: {mute_status}\n"
                 f"消息摘要: {preview}"
             )
             for umo in admin_umos:
