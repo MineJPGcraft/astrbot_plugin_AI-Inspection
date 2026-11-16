@@ -529,7 +529,15 @@
         "type": "list",
         "default": [],
         "_special": "sender_id",
-        "hint": "白名单中的用户消息不会经过审核。"
+        "hint": "白名单中的用户消息不会经过审核（黑名单优先级高于白名单）。"
+      },
+      "blacklist_users": {
+        "description": "重点监控黑名单用户 ID / member_openid",
+        "type": "list",
+        "default": [],
+        "_special": "sender_id",
+        "obvious_hint": true,
+        "hint": "此列表中的用户不受「审核时段限制」、白名单和长度预过滤约束：只要在已监控的群内发送消息，就会强制执行本地敏感词与 AI 审核（群主/群管仍受平台权限保护，仅记录日志和告警）。"
       },
       "skip_commands": {
         "description": "跳过指令前缀消息",

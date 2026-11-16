@@ -17,6 +17,7 @@ from .core import (
     AuditDecision,
     CategoryRule,
     MODE_DISABLED,
+    MODE_FULL,
     MODE_KEYWORD_ONLY,
     MessageModerator,
     ModerationTracker,
@@ -86,6 +87,17 @@ class AIInspectionPlugin(Star):
             return True
 
         return bool(scope.get("audit_all_groups", False))
+
+    def _is_sender_blacklisted(self, sender_id: str) -> bool:
+        if not sender_id:
+            return False
+        wf = self.config.get("whitelist_and_filter", {}) or {}
+        blacklist = {
+            str(x).strip()
+            for x in (wf.get("blacklist_users") or [])
+            if str(x).strip()
+        }
+        return sender_id in blacklist
 
     def _is_sender_exempt(self, event: AstrMessageEvent, sender_id: str) -> bool:
         wf = self.config.get("whitelist_and_filter", {}) or {}
@@ -179,20 +191,26 @@ class AIInspectionPlugin(Star):
         if raw_text.startswith("/audit"):
             return
 
+        sender_id = extract_member_openid(event)
+        self_id = str(getattr(event.message_obj, "self_id", "") or "").strip()
+        if self_id and sender_id == self_id:
+            return
+
+        is_blacklisted = self._is_sender_blacklisted(sender_id)
         wf = self.config.get("whitelist_and_filter", {}) or {}
-        if bool(wf.get("skip_commands", True)) and raw_text.startswith("/"):
+        if not is_blacklisted and bool(wf.get("skip_commands", True)) and raw_text.startswith("/"):
             return
 
         sched = evaluate_schedule(self.config)
-        if sched.mode == MODE_DISABLED:
+        effective_mode = MODE_FULL if is_blacklisted else sched.mode
+        if effective_mode == MODE_DISABLED:
             if self._is_debug():
                 logger.info(f"[AI-Inspection] {sched.summary}，跳过群 {group_openid} 消息")
             return
 
-        sender_id = extract_member_openid(event)
         sender_name = event.get_sender_name() or sender_id
         llm_cfg = self.config.get("llm", {}) or {}
-        audit_image = bool(llm_cfg.get("audit_image", True)) and sched.mode != MODE_KEYWORD_ONLY
+        audit_image = bool(llm_cfg.get("audit_image", True)) and effective_mode != MODE_KEYWORD_ONLY
 
         text, image_urls, is_pure_face = await self._extract_message_payload(
             event, audit_image=audit_image
@@ -209,20 +227,29 @@ class AIInspectionPlugin(Star):
             image_count=len(image_urls),
         )
 
-        if self._is_sender_exempt(event, sender_id):
-            return
+        if is_blacklisted:
+            if not text.strip() and not image_urls:
+                return
+            if sched.mode != MODE_FULL and self._is_debug():
+                logger.info(
+                    f"[AI-Inspection] 命中重点监控黑名单用户 {sender_name}({sender_id})，"
+                    "忽略时段限制强制执行完整审核"
+                )
+        else:
+            if self._is_sender_exempt(event, sender_id):
+                return
 
-        if is_pure_face and bool(wf.get("ignore_pure_emoji_face", False)):
-            return
+            if is_pure_face and bool(wf.get("ignore_pure_emoji_face", False)):
+                return
 
-        min_len = max(0, int(wf.get("min_text_length", 1)))
-        if not image_urls and len(text.strip()) < min_len:
-            return
+            min_len = max(0, int(wf.get("min_text_length", 1)))
+            if not image_urls and len(text.strip()) < min_len:
+                return
 
-        if self.moderator.check_keyword_allowlist(
-            text, wf.get("keyword_allowlist") or []
-        ):
-            return
+            if self.moderator.check_keyword_allowlist(
+                text, wf.get("keyword_allowlist") or []
+            ):
+                return
 
         categories = build_active_categories(self.config)
 
@@ -272,7 +299,7 @@ class AIInspectionPlugin(Star):
             )
             return
 
-        if sched.mode == MODE_KEYWORD_ONLY:
+        if effective_mode == MODE_KEYWORD_ONLY:
             if self._is_debug():
                 logger.info(f"[AI-Inspection] {sched.summary}，跳过 AI 审核")
             return
